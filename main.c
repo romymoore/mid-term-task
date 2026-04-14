@@ -8,6 +8,10 @@
 #define bitClear(reg, n) (reg &= ~(1 << n))
 #define bitCheck(reg, n) (reg >> n & 1)
 
+#define red_light PB0
+#define yellow_light PB1
+#define green_light PB2
+
 #define adc_min 0
 #define adc_max 1023
 #define pwm_min 0
@@ -21,6 +25,7 @@ void usart_send_string(const char* pstr);
 void usart_send_num(float num, char num_int, char num_decimals);
 
 int adc = 0;
+volatile unsigned char led_state = 0;
 
 ISR(ADC_vect)
 {
@@ -30,32 +35,55 @@ ISR(ADC_vect)
 ISR(TIMER1_COMPA_vect)
 {
   // this will change between the 3 leds every second
+  if(led_state == 0)
+  {
+    DDRB = 0b00000000;
+    bitSet(DDRB, red_light);
+    led_state = 1;
+  }
+  else if(led_state == 1)
+  {
+    DDRB = 0b00000000;
+    bitSet(DDRB, yellow_light);
+    led_state = 2;
+  }
+  else
+  {
+    DDRB = 0b00000000;
+    bitSet(DDRB, green_light);
+    led_state = 0;
+  }
 }
 
 int main (){
 
   usart_init(9600);
 
-  bitSet(ADMUX, REFS0);
-  bitSet(ADMUX, MUX1);
-  ADCSRA = 7;
-  bitSet(ADCSRA, ADIE);
-  bitSet(ADCSRA, ADEN);
+  _delay_ms(10);
 
-  TCCR1A = 0;              // normal operation
-  TCCR1B = 0;              // reset config
-  OCR1A = 15624;          // 1 second match value
-  TCCR1B |= (1 << WGM12); // CTC mode
-      // prescaler = 1024
-  TCCR1B |= (1 << CS12) | (1 << CS10);
-  TIMSK1 |= (1 << OCIE1A); // enable interrupt
+  // PWM for LEDs | timer0
+  DDRD |= 1 << PD6;                                         // Sets PD6 as output pin
+  TCCR0A = (1 << COM0A1) | (1 << WGM01) | (1 << WGM00);     // Fast PWM mode, non-inverting
+  TCCR0B = (1 << CS01) | (1 << CS00);                       // Prescaler = 64                   
 
+  // ADC setup
+  bitSet(ADMUX, REFS0);                                     // Sets AVcc reference as 5V
+  bitSet(ADMUX, MUX1);                                      // Select ADC2 (PC2) as input                    
+  ADCSRA = 7;                                               // Set ADC clock prescaler to 128 (16MHz/128 = 125KHz)       
+  bitSet(ADCSRA, ADIE);                                     // Enable ADC interrupt
+  bitSet(ADCSRA, ADEN);                                     // Enable ADC module
 
-  unsigned char pwm_value = 0;
+  // 1 second timer | timer1
+  TCCR1A = 0;                                               // Clear control register A, normal mode
+  TCCR1B = 0;                                               // Clear control register B    
+  OCR1A = 15624;                                            // sets compare value (16MHz/1024 prescaler = 15625 counts per second)
+  TCCR1B |= (1 << WGM12);                                   // CTC mode
+  TCCR1B |= (1 << CS12) | (1 << CS10);                      // Prescaler = 1024
+  TIMSK1 |= (1 << OCIE1A);                                  // Enable timer compare interrupt 
 
   sei();
 
-  _delay_ms(10);
+  unsigned char pwm_value = 0;
 
   while (1)
   {
