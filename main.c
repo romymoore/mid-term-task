@@ -12,6 +12,9 @@
 #define yellow_light PB1
 #define green_light PB2
 
+#define sonar_trigger PB3
+#define sonar_echo PB4
+
 #define adc_min 0
 #define adc_max 1023
 #define pwm_min 0
@@ -24,32 +27,40 @@ void usart_send_byte(unsigned char data);
 void usart_send_string(const char* pstr);
 void usart_send_num(float num, char num_int, char num_decimals);
 
-int adc = 0;
+volatile int adc = 0;
 volatile unsigned char led_state = 0;
+// led_state: 0 = red, 
+// led_state: 1 = yellow
+// led_state: 2 = green
+// led_state: 3 = object detected, stay red until object is out of range
+// led_state: 5 = manual red
+// led_state: 6 = manual yellow
+// led_state: 7 = manual green
+// led_state: 8 = emergency green
 
 ISR(ADC_vect)
 {
-  adc = ADC;
+  adc = ADC;  // Read ADC value and store in global variable
 }
 
 ISR(TIMER1_COMPA_vect)
 {
-  // this will change between the 3 leds every second
+  // this ISR changes between the 3 leds each second when in auto mode
   if(led_state == 0)
   {
-    DDRB = 0b00000000;
+    DDRB = 0b00001000;
     bitSet(DDRB, red_light);
     led_state = 1;
   }
   else if(led_state == 1)
   {
-    DDRB = 0b00000000;
+    DDRB = 0b00001000;
     bitSet(DDRB, yellow_light);
     led_state = 2;
   }
-  else
+  else if(led_state == 2)
   {
-    DDRB = 0b00000000;
+    DDRB = 0b00001000;
     bitSet(DDRB, green_light);
     led_state = 0;
   }
@@ -85,6 +96,10 @@ int main (){
 
   unsigned char pwm_value = 0;
 
+  int count = 0;
+  int vel_sound = 343;
+  int timeout = 30000;
+
   while (1)
   {
     bitSet(ADCSRA, ADSC);
@@ -95,6 +110,42 @@ int main (){
     pwm_value = 255 - linear_map(adc, adc_min, adc_max, pwm_min, pwm_max);
    
     OCR0A = pwm_value;
+
+    count = 0;
+    timeout = 30000;
+
+    bitClear(PORTB, sonar_trigger);
+    _delay_us(2);
+    bitSet(PORTB, sonar_trigger);
+    _delay_us(11);
+    bitClear(PORTB, sonar_trigger);
+
+    while(!bitCheck(PINB, sonar_echo));
+
+    while(bitCheck(PINB, sonar_echo) && timeout--)
+    {
+      count++;
+      _delay_us(1);
+    }
+
+    float Distance = (float)count / 1.0e6 * vel_sound / 2. *1000.;
+ 
+    usart_send_string(">Distance:");
+    usart_send_num(Distance, 6, 6);
+    usart_send_byte('\n');
+
+    if(Distance < 200)
+    {
+      led_state = 3;
+      DDRB = 0b00001000;
+      bitSet(DDRB, red_light);
+    }
+    else if(led_state == 3 && Distance >= 200)
+    {
+      led_state = 0;
+    }
+
+    _delay_ms(10); 
 
   }
 
