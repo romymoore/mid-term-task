@@ -257,13 +257,13 @@ int main (){
     usart_send_num(Distance, 6, 6);
     usart_send_byte('\n');
 
-    if(Distance < 200 && led_state == 0)
+    if(Distance < 200 && led_state == 1)
     {
       led_state = 3;
       DDRB = 0b00001000;
       bitSet(DDRB, red_light);
     }
-    else if(Distance <200 && (led_state == 1 || led_state == 2))
+    else if(Distance < 200 && (led_state == 2 || led_state == 0))
     {
       led_state = 9;
       DDRB = 0b00001000;
@@ -283,32 +283,32 @@ int main (){
 
         bitClear(DDRD, PD3);                     // Turn off buzzer
 
-        for(int i = 0; i <= pow(10,-Distance+200/50); i++)
+        for(int i = 0; i <= pow(10,4-Distance/50); i++)
         {
           _delay_ms(1);
         }
       }
     else if(Distance > 0 && Distance < 50 && led_state == 9)
     {
-      bitSet(DDRD, PD3);                       // Turn on buzzer
+       bitSet(DDRD, PD3);                       // Turn on buzzer
 
         _delay_ms(75);
 
         bitClear(DDRD, PD3);                     // Turn off buzzer
 
-        _delay_ms(10);
   
+        _delay_ms(1000);
     }
     else if(Distance > 150 && Distance < 200 && led_state == 9)
     {
-      bitSet(DDRD, PD3);                       // Turn on buzzer
+       bitSet(DDRD, PD3);                       // Turn on buzzer
 
         _delay_ms(75);
 
         bitClear(DDRD, PD3);                     // Turn off buzzer
 
-        _delay_ms(1000);
   
+        _delay_ms(10);
     }
 
   }
