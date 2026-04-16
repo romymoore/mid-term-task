@@ -271,7 +271,9 @@ int main (){
     _delay_us(11);
     bitClear(PORTB, sonar_trigger);
 
-    while(!bitCheck(PINB, sonar_echo));
+    int rising_timeout = 30000;
+    while(!bitCheck(PINB, sonar_echo) && rising_timeout--);
+    if (rising_timeout <= 0) continue;
 
     while(bitCheck(PINB, sonar_echo) && timeout--)
     {
