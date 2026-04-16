@@ -43,6 +43,10 @@ volatile unsigned char led_state = 0;
 // led_state: 8 = emergency green
 // led_state: 9 = object detected, sound buzzer and stay red until object is out of range
 
+volatile int debug_mode = 0;
+volatile bool mode_changed = false;
+bool flag_read_done = 0;
+
 ISR(ADC_vect)
 {
   adc = ADC;  // Read ADC value and store in global variable
@@ -143,6 +147,16 @@ ISR(INT0_vect)
   }
 }
 
+ISR(USART_RX_vect)
+{
+  char data = UDR0;
+  if (data >= '0' && data <= '3')
+  {
+    debug_mode = data - '0';
+    mode_changed = true;  
+  }
+}
+
 int main (){
 
   usart_init(9600);
@@ -200,8 +214,17 @@ int main (){
   int vel_sound = 343;
   int timeout = 30000;
 
+  char buf[16];
+
   while (1)
   {
+    if (mode_changed)
+    {
+      usart_send_string("Mode set to: ");
+      usart_send_byte('0' + debug_mode);
+      usart_send_byte('\n');
+      mode_changed = false;
+    }
     if(manual_mode && led_state == 0)
     {
       led_state = 7;
@@ -226,9 +249,14 @@ int main (){
     }
 
     bitSet(ADCSRA, ADSC);
-    usart_send_string(">adc: ");
-    usart_send_num(adc, 4, 0);
-    usart_send_byte('\n');
+   if (debug_mode == 2 || debug_mode == 3)
+    {
+      itoa(adc, buf, 10);
+      usart_send_string(">adc:");
+      usart_send_string(buf);
+      usart_send_byte('\n');
+    }
+
 
     pwm_value = 255 - linear_map(adc, adc_min, adc_max, pwm_min, pwm_max);
    
@@ -252,10 +280,14 @@ int main (){
     }
 
     float Distance = (float)count / 1.0e6 * vel_sound / 2. *1000.;
- 
-    usart_send_string(">Distance:");
-    usart_send_num(Distance, 6, 6);
-    usart_send_byte('\n');
+    if (debug_mode == 1 || debug_mode == 3)
+    {
+      itoa(Distance, buf, 10);
+      usart_send_string(">Distance:");
+      usart_send_string(buf);
+      usart_send_byte('\n');
+    }
+
 
     if(Distance < 200 && led_state == 1)
     {
@@ -328,6 +360,8 @@ void usart_init(float baud)
 
   UBRR0 = ubrr0a;
   bitSet(UCSR0B, TXEN0);
+  bitSet(UCSR0B, RXEN0);
+  bitSet(UCSR0B, RXCIE0);
   UCSR0C |= 3 << UCSZ00;
 
 }
@@ -364,4 +398,45 @@ void usart_send_num(float num, char num_int, char num_decimals)
   sprintf(fracbuf, "%d", (int)frac);
   usart_send_string(fracbuf);
 
+}
+
+void usart_read(char *ptr)
+{
+  char tmp;
+  while(1)
+  {
+    while (!bitCheck(UCSR0A, RXC0));
+    tmp = UDR0;
+    if(tmp == '\r' || tmp == '\n')
+    {
+      *ptr = '\0';
+      flag_read_done = 1;
+      return;
+    }
+    else
+    {
+      *ptr++ = tmp;
+    }
+  }
+}
+
+void process_input(void)
+{
+  if(bitCheck(UCSR0A, RXC0))
+  {
+    char tmp = UDR0;
+
+    if(tmp >= '0' && tmp <= '3')
+    {
+      debug_mode = tmp - '0';
+
+      usart_send_string("Mode set to: ");
+      usart_send_byte(tmp);
+      usart_send_byte('\n');
+    }
+    else
+    {
+      usart_send_string("Invalid input\n");
+    }
+  }
 }
