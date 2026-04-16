@@ -27,6 +27,10 @@ void usart_send_byte(unsigned char data);
 void usart_send_string(const char* pstr);
 void usart_send_num(float num, char num_int, char num_decimals);
 
+volatile bool manual_mode = false;
+volatile bool button_active1 = true;
+volatile bool button_active2 = true;
+
 volatile int adc = 0;
 volatile unsigned char led_state = 0;
 // led_state: 0 = red, 
@@ -37,6 +41,7 @@ volatile unsigned char led_state = 0;
 // led_state: 6 = manual yellow
 // led_state: 7 = manual green
 // led_state: 8 = emergency green
+// led_state: 9 = object detected, sound buzzer and stay red until object is out of range
 
 ISR(ADC_vect)
 {
@@ -66,6 +71,78 @@ ISR(TIMER1_COMPA_vect)
   }
 }
 
+ISR(PCINT2_vect)
+{
+
+  if (!bitCheck(PIND, PD5))
+  {
+    button_active1 = !bitCheck(PIND, PD5);
+
+    _delay_ms(30);
+
+    button_active2 = !bitCheck(PIND, PD5);
+
+    if(button_active1 && button_active2 && manual_mode)
+    {
+      if(led_state == 7)
+      {
+        DDRB = 0b00001000;
+        bitSet(DDRB, red_light);
+        led_state = 1;
+      }
+      else if(led_state == 5)
+      {
+        DDRB = 0b00001000;
+        bitSet(DDRB, yellow_light);
+        led_state = 2;
+      }
+      else if(led_state == 6)
+      {
+        DDRB = 0b00001000;
+        bitSet(DDRB, green_light);
+        led_state = 0;
+      }
+    }
+  }
+
+  if (!bitCheck(PIND, PD4))
+  {
+    button_active1 = !bitCheck(PIND, PD4);
+
+    _delay_ms(30);
+
+    button_active2 = !bitCheck(PIND, PD4);
+
+    if(button_active1 && button_active2)
+    {
+      manual_mode = !manual_mode;
+    }
+  }
+}
+
+ISR(INT0_vect)
+{
+  button_active1 = !bitCheck(PIND, PD2);
+
+  _delay_ms(30);
+
+  button_active2 = !bitCheck(PIND, PD2);
+
+  if(button_active1 && button_active2)
+  {
+    if(led_state != 8)
+    {
+      led_state = 8;
+      DDRB = 0b00001000;
+      bitSet(DDRB, green_light);
+    }
+    else
+    {
+      led_state = 0;
+    }
+  }
+}
+
 int main (){
 
   usart_init(9600);
@@ -92,6 +169,29 @@ int main (){
   TCCR1B |= (1 << CS12) | (1 << CS10);                      // Prescaler = 1024
   TIMSK1 |= (1 << OCIE1A);                                  // Enable timer compare interrupt 
 
+  // Set pin 4 as input for manual mode button
+  bitSet(PORTD, PD4);                                       // Enable pull-up resistor on PD4
+  PCICR |= (1 << PCIE2);                                    // Enable pin change interrupt for PORTD group
+  PCMSK2 |= (1 << PCINT20);                                 // Enable pin change interrupt for PD4           
+
+  // Set pin 5 as the input for the manual switch button
+  bitSet(PORTD, PD5);                                       // Enable pull-up resistor on PD5
+  PCMSK2 |= (1 << PCINT21);                                 // Enable pin change interrupt
+
+  // Set pin 2 as input for the emergency switch button with external interrupt
+  bitSet(PORTD, PD2);                                       // Enable pull-up resistor on PD2
+  EICRA |= (1 << ISC01);
+  EICRA &= ~(1 << ISC00);                                   // (ISC01=1 and ISC00=0 means trigger on falling edge)
+  EIMSK |= (1 << INT0);                                     // Enable external interrupt INT0
+  
+  // Set pin 3 as PWM for buzzer | timer2
+  TCCR2A = 0;                                               // Clear control register A
+  TCCR2B = 0;                                               // Clear control register B
+  TCCR2A |= (1 << COM2B0);                                  // Toggle OC2B on compare match
+  TCCR2A |= (1 << WGM21);                                   // CTC mode
+  TCCR2B |= (1 << CS22) | (1 << CS20);                      // Prescaler = 128
+  OCR2A = 238;                                              // Set frequency
+  
   sei();
 
   unsigned char pwm_value = 0;
@@ -102,6 +202,29 @@ int main (){
 
   while (1)
   {
+    if(manual_mode && led_state == 0)
+    {
+      led_state = 7;
+      DDRB = 0b00001000;
+      bitSet(DDRB, green_light);
+    }
+    else if(manual_mode && led_state == 1)
+    {
+      led_state = 5;
+      DDRB = 0b00001000;
+      bitSet(DDRB, red_light);
+    }
+    else if(manual_mode && led_state == 2)
+    {
+      led_state = 6;
+      DDRB = 0b00001000;
+      bitSet(DDRB, yellow_light);
+    }
+    else if(!manual_mode && (led_state == 5 || led_state == 6 || led_state == 7))
+    {
+      led_state = 0;
+    }
+
     bitSet(ADCSRA, ADSC);
     usart_send_string(">adc: ");
     usart_send_num(adc, 4, 0);
@@ -134,18 +257,59 @@ int main (){
     usart_send_num(Distance, 6, 6);
     usart_send_byte('\n');
 
-    if(Distance < 200)
+    if(Distance < 200 && led_state == 0)
     {
       led_state = 3;
       DDRB = 0b00001000;
       bitSet(DDRB, red_light);
     }
-    else if(led_state == 3 && Distance >= 200)
+    else if(Distance <200 && (led_state == 1 || led_state == 2))
+    {
+      led_state = 9;
+      DDRB = 0b00001000;
+      bitSet(DDRB, red_light);
+    }
+    else if((led_state == 3 || led_state == 9) && Distance >= 200)
     {
       led_state = 0;
     }
 
-    _delay_ms(10); 
+    
+  if(Distance > 50 && Distance < 150 && led_state == 9)
+      {
+        bitSet(DDRD, PD3);                       // Turn on buzzer
+
+        _delay_ms(75);
+
+        bitClear(DDRD, PD3);                     // Turn off buzzer
+
+        for(int i = 0; i <= pow(10,-Distance+200/50); i++)
+        {
+          _delay_ms(1);
+        }
+      }
+    else if(Distance > 0 && Distance < 50 && led_state == 9)
+    {
+      bitSet(DDRD, PD3);                       // Turn on buzzer
+
+        _delay_ms(75);
+
+        bitClear(DDRD, PD3);                     // Turn off buzzer
+
+        _delay_ms(10);
+  
+    }
+    else if(Distance > 150 && Distance < 200 && led_state == 9)
+    {
+      bitSet(DDRD, PD3);                       // Turn on buzzer
+
+        _delay_ms(75);
+
+        bitClear(DDRD, PD3);                     // Turn off buzzer
+
+        _delay_ms(1000);
+  
+    }
 
   }
 
