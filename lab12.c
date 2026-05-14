@@ -11,8 +11,8 @@
 
 #define pin_pwm PD3
 
-volatile float tLow;
-volatile float tHigh;
+volatile float tLow = 0;
+volatile float tHigh = 0;
 
 float tFall = 0;
 float tRise = 0;
@@ -75,7 +75,10 @@ int main()
   sei();
 
   float dc_est = 0;
-  float dc_real = (OCR2B = 1.)/(OCR2A +1.) * 100.;
+  float dc_real = (OCR2B + 1.)/(OCR2A + 1.) * 100.;
+
+  float fq_est = 0;
+  float fq_real = 16.e6 / 1024 / (OCR2A + 1);
 
   unsigned int cnt = 0;
 
@@ -84,8 +87,11 @@ int main()
     if (tHigh !=0 && tLow != 0)
     {
      // dc_est = tLow / (tLow - tLow-old) * 100;
-     dc_est = tHigh / (tHigh + tLow) * 100;
+     dc_est = tLow / (tHigh + tLow) * 100;
     }
+
+    fq_est = 1. / (tHigh + tLow);
+    fq_real = 16.e6 / 1024 / (OCR2A + 1);
 
     usart_send_string(">dc_est(%):");
     usart_send_num(dc_est, 3, 3);
@@ -93,18 +99,24 @@ int main()
     usart_send_string(">dc_real(%):");
     usart_send_num(dc_real, 3, 3);
     usart_send_byte('\n');
+    usart_send_string(">fq_est(Hz):");
+    usart_send_num(fq_est, 6, 3);
+    usart_send_byte('\n');
+    usart_send_string(">fq_real(Hz):");
+    usart_send_num(fq_real, 6, 3);
+    usart_send_byte('\n');
     usart_send_string(">tHigh:");
-    usart_send_num(tHigh, 6, 3);
+    usart_send_num(tHigh * 1e4, 6, 3);
     usart_send_byte('\n');
     usart_send_string(">tLow:");
-    usart_send_num(tLow, 6, 3);
+    usart_send_num(tLow * 1e4, 6, 3);
     usart_send_byte('\n');
 
-    _delay_ms(10);
+    _delay_ms(15);
 
     if (cnt++ % 100 == 0)
     {
-      OCR2B++;
+      OCR2B--;
       dc_real = (OCR2B + 1.)/(OCR2A + 1.) * 100.;
       if (OCR2B == OCR2A)
       {
@@ -137,7 +149,7 @@ void set_tc2()
   TCCR2A |= (1 << COM2B1); // Clear OC2B on compare match, set OC2B at BOTTOM (non-inverting mode)
 
   OCR2A = 199;
-  OCR2B = 9;
+  OCR2B = 199;
 
   TCCR2B |= 1 << CS22 | 1 << CS21 | 1 << CS20; // Prescaler 1024
 }
